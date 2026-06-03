@@ -1,0 +1,832 @@
+{
+  "name": "AI Engineer Technical Assessment",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -320,
+        -240
+      ],
+      "id": "79f1e747-2dbf-481e-87da-1bd5880b5b6c",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-5",
+          "mode": "list",
+          "cachedResultName": "GPT-5"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=You are an AI support triage assistant.\n\nAnalyze the customer message and return ONLY valid JSON.\n\nTasks:\n\n1. Classify into one category:\nBug Report, Feature Request, Billing Issue, Technical Question, Incident/Outage\n\nCategory Guidelines:\n- Bug Report: Something is broken for a user (errors, failures, unexpected behavior)\n- Feature Request: Request for a new feature or improvement\n- Billing Issue: Charges, invoices, pricing discrepancies\n- Technical Question: Setup, integrations, configuration, how-to questions (e.g., SSO, API)\n- Incident/Outage: System-wide issue, downtime, or multiple users affected\n\n2. Assign priority: Low, Medium, High\n\nPriority Guidelines:\n- High: outages, login failures, billing discrepancies, multiple users affected, blocking issues\n- Medium: technical questions, configuration issues, integrations, non-blocking bugs\n- Low: feature requests, suggestions, general inquiries\n\n3. Provide confidence score (0–1)\n\nConfidence Guidelines:\n- High (0.85–1.0): clear intent and category\n- Medium (0.6–0.85): some ambiguity\n- Low (<0.6): unclear, vague, or mixed intent\n\nIMPORTANT:\n- If the message is vague, lacks details, or could belong to multiple categories, assign a LOWER confidence score (<0.7)\n- Do NOT guess with high confidence when the intent is unclear\n- Prefer lower confidence over incorrect certainty\n\n4. Extract:\n- core_issue (1 sentence)\n- entities (IDs, invoice numbers, error codes, URLs)\n\nEntity Guidelines:\nExtract only relevant identifiers such as:\n- error codes (e.g., 403)\n- invoice numbers (e.g., #8821)\n- URLs\n- account identifiers\n\n5. Assign urgency: Low, Medium, High\n\nUrgency Guidelines:\n- High: urgent tone, blocking issues, multiple users affected\n- Medium: moderate importance, non-blocking issues\n- Low: informational or non-urgent requests\n\n6. Provide a 2–3 sentence internal summary\n\nMessage:\n{{ $json[\"message\"] }}\n\nReturn ONLY raw JSON:\nDo NOT include markdown, backticks, or explanations.\n\n{\n  \"category\": \"\",\n  \"priority\": \"\",\n  \"confidence\": 0.0,\n  \"core_issue\": \"\",\n  \"entities\": {},\n  \"urgency\": \"\",\n  \"summary\": \"\"\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        112,
+        -240
+      ],
+      "id": "a3e543d1-348e-4acd-844b-d4cea381818f",
+      "name": "LLM - Classification & Enrichment",
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": "",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  let raw;\n\n  if (item.json.output_text) {\n    raw = item.json.output_text;\n  } else if (item.json.text) {\n    raw = item.json.text;\n  } else if (item.json.output?.[0]?.content?.[0]?.text) {\n    raw = item.json.output[0].content[0].text;\n  } else {\n    throw new Error(\"No model output found\");\n  }\n\n  const cleaned = raw\n    .replace(/```json/gi, '')\n    .replace(/```/g, '')\n    .trim();\n\n  let data;\n  try {\n    data = JSON.parse(cleaned);\n  } catch (e) {\n    throw new Error(\"Invalid JSON from model: \" + cleaned);\n  }\n\n  // 🔥 SAFE STRUCTURE (THIS FIXES FALLBACK)\n  return {\n    json: {\n      ...item.json,\n\n      classification: {\n        category: data.category ?? null,\n        priority: data.priority ?? null,\n        confidence: data.confidence ?? null\n      },\n\n      enrichment: {\n        core_issue: data.core_issue ?? \"\",\n        entities: data.entities ?? {},\n        urgency: data.urgency ?? \"Low\",\n        summary: data.summary ?? \"\"\n      }\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        -240
+      ],
+      "id": "7fc1486f-4004-4c1a-a080-87518fa00fe5",
+      "name": "Parse LLM Output"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "9e4938e5-6088-40de-a6e4-e77f70e5cfc8",
+              "leftValue": "={{$json.classification.category}}",
+              "rightValue": "Bug Report",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "d514d9b1-cb9a-4884-b8f1-ef9d2cdee745",
+              "leftValue": "={{$json.classification.category}}",
+              "rightValue": "Incident/Outage",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "looseTypeValidation": "=",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        832,
+        -160
+      ],
+      "id": "aaefb9b9-6b8d-41d2-918d-7a9c99a5360e",
+      "name": "Route: Engineering?"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "38895b5e-c319-47a0-b8f5-b1bf634723a7",
+              "name": "queue",
+              "value": "Engineering",
+              "type": "string"
+            },
+            {
+              "id": "7a316b95-441c-421c-a5a6-ba1277fc9ad4",
+              "name": "handled_by",
+              "value": "Engineering Team",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1008,
+        -304
+      ],
+      "id": "c48fa5c0-71a4-4d18-a649-fa6885127050",
+      "name": "Assign: Engineering"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "dc22155c-0d39-4f68-ad11-a8b2b30df4f7",
+              "leftValue": "={{$json.classification.category}}",
+              "rightValue": "Billing Issue",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1008,
+        -64
+      ],
+      "id": "668db312-28c5-40cb-8fd2-a52aca1ec249",
+      "name": "Route: Billing?"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d7905555-7ea4-4c71-a01e-ba1eca5f9d8d",
+              "name": "queue",
+              "value": "Billing",
+              "type": "string"
+            },
+            {
+              "id": "7bbd7427-9a8b-4474-8237-69bd6ccc95ce",
+              "name": "handled_by",
+              "value": "Billing Team",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1216,
+        -160
+      ],
+      "id": "4337bd12-e62a-4209-bcec-d9311add4bee",
+      "name": "Assign: Billing"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4ca0d633-cd35-4794-b865-0b1514e70307",
+              "leftValue": "={{$json.classification.category}}",
+              "rightValue": "Feature Request",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1216,
+        32
+      ],
+      "id": "6798d514-1e0d-4137-b240-aa8ef150c7df",
+      "name": "Route: Product?"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3757898f-f9fd-43f7-978c-4533e035305f",
+              "name": "queue",
+              "value": "Product",
+              "type": "string"
+            },
+            {
+              "id": "6bf7a683-1987-4f49-85ea-8bc11dba51ed",
+              "name": "handled_by",
+              "value": "Product Team",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1424,
+        -64
+      ],
+      "id": "b7db5369-7ad1-4b9c-abaf-071baed27133",
+      "name": "Assign: Product"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "fbeb91f6-3d19-4c84-aa6f-596e3e6bafd1",
+              "leftValue": "={{$json.classification.category}}",
+              "rightValue": "IT",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1424,
+        144
+      ],
+      "id": "a78c4f74-7e5f-4e22-a2d4-f7cd39e5b843",
+      "name": "Route: IT?"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "de19157d-9e61-4c32-bd79-0604e6615b05",
+              "name": "queue ",
+              "value": "IT/Support",
+              "type": "string"
+            },
+            {
+              "id": "c24f7d1f-f967-4153-814c-54a7ad9d2f69",
+              "name": "handled_by",
+              "value": "Support Team",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1664,
+        32
+      ],
+      "id": "5b0ea106-3bee-4eed-a93e-e20e84513c4c",
+      "name": "Assign: IT"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "37347efe-f99b-4813-9ae2-bfbd5ba614d1",
+              "name": "queue",
+              "value": "Customer Success",
+              "type": "string"
+            },
+            {
+              "id": "ef4cc83e-dc41-4449-9973-e7c1991bd457",
+              "name": "handled_by",
+              "value": "Customer Success Team",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1632,
+        240
+      ],
+      "id": "996c65c2-814d-4aa7-aeb9-ca51b356d215",
+      "name": "Assign: Customer Success (Default)"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const classification = item.json.classification ?? item.json ?? {};\n  const enrichment = item.json.enrichment ?? {};\n\n  const message =\n    item.json.original_message ??\n    item.json.message ??\n    \"\";\n\n  const category =\n    classification.category ??\n    item.json.category ??\n    null;\n\n  const priority =\n    classification.priority ??\n    item.json.priority ??\n    null;\n\n  const confidence =\n    classification.confidence ??\n    item.json.confidence ??\n    null;\n\n  const urgency =\n    enrichment.urgency ??\n    item.json.urgency ??\n    \"Low\";\n\n  const core_issue =\n    enrichment.core_issue ??\n    item.json.core_issue ??\n    \"Unclear issue — requires human review\";\n\n  const summary =\n    enrichment.summary ??\n    item.json.summary ??\n    \"The message requires human review due to insufficient clarity.\";\n\n  const entities =\n    enrichment.entities ??\n    item.json.entities ??\n    {};\n\n  // 🔹 ESCALATION (UNCHANGED)\n  const escalationKeywords = [\n    \"outage\",\"system down\",\"down for all users\",\"down for everyone\",\n    \"service unavailable\",\"cannot access\",\"can't access\",\n    \"login failure\",\"cannot login\",\"can't login\",\"login issue\",\n    \"data loss\",\"lost data\",\n    \"security issue\",\"security breach\",\"unauthorized access\",\"hacked\",\n    \"urgent\",\"asap\",\"immediately\",\"blocking\",\"production issue\",\"critical\",\n    \"billing error\",\"overcharged\",\"charged twice\",\"incorrect charge\"\n  ];\n\n  const keywordEscalation = escalationKeywords.some(k =>\n    message.toLowerCase().includes(k)\n  );\n\n  const escalation =\n    priority === \"High\" ||\n    urgency === \"High\" ||\n    keywordEscalation;\n\n  // 🔹 QUEUE (KEEP ORIGINAL)\n  const queue =\n    item.json.queue ?? \"Customer Success\";\n\n  let finalQueue =\n    item.json.final_queue ?? queue;\n\n  if (escalation && !item.json.fallback) {\n    finalQueue = \"Escalation Queue\";\n  }\n\n  // 🔥 FIX: ensure handled_by is NEVER empty\n  const handled_by =\n    item.json.handled_by ??\n    (queue === \"Engineering\" ? \"Engineering Team\" :\n     queue === \"Billing\" ? \"Billing Team\" :\n     queue === \"Product\" ? \"Product Team\" :\n     queue === \"IT\" ? \"IT Team\" :\n     queue === \"Fallback\" ? \"Human Review Team\" :\n     \"Customer Success Team\");\n\n  return {\n    json: {\n      message,\n\n      category,\n      priority,\n      confidence,\n\n      core_issue,\n      entities,\n      urgency,\n      summary,\n\n      queue,\n      handled_by,\n\n      fallback: item.json.fallback ?? false,\n      escalation,\n\n      final_queue: finalQueue\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        -176
+      ],
+      "id": "3c83bb4e-a619-4723-85fa-5901afa8ef0a",
+      "name": "Finalize: Escalation & Output"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "bd80c9bc-7ebb-4eef-a033-ce3faf908816",
+              "leftValue": "={{$json.classification.confidence}}",
+              "rightValue": 0.7,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        592,
+        -336
+      ],
+      "id": "538a47ff-6bb6-4134-b8b9-4a162535b961",
+      "name": "Route: Fallback?"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ded0ab5d-df8d-40a6-be9f-dfd6122292a6",
+              "name": "queue",
+              "value": "Fallback",
+              "type": "string"
+            },
+            {
+              "id": "30f4a87b-5bcb-42ab-839c-c431a2c1b9eb",
+              "name": "handled_by",
+              "value": "Human Review",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        992,
+        -480
+      ],
+      "id": "f0e3e326-3de7-4b8f-80da-bb6abd4f59bc",
+      "name": "Assign: Human Review"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    json: {\n      message: \"Hi, I tried logging in this morning and keep getting a 403 error. My account is arcvault.io/user/jsmith. This started after your update last Tuesday.\"\n    }\n  },\n  {\n    json: {\n      message: \"We'd love to see a bulk export feature for our audit logs. We're a compliance-heavy org and this would save us hours every month.\"\n    }\n  },\n  {\n    json: {\n      message: \"Invoice #8821 shows a charge of $1,240 but our contract rate is $980/month. Can someone look into this?\"\n    }\n  },\n  {\n    json: {\n      message: \"I'm not sure if this is the right place to ask, but is there a way to set up SSO with Okta? We're evaluating switching our auth provider.\"\n    }\n  },\n  {\n    json: {\n      message: \"Your dashboard stopped loading for us around 2pm EST. Checked our end — it's definitely on yours. Multiple users affected.\"\n    }\n  },\n   {\n    json: {\n      message: \"Something seems off with my account, it's not working properly.\"\n    }\n  }\n];;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -112,
+        -240
+      ],
+      "id": "c13e3cd8-9a2b-43a0-b9e8-7b4bea2a47f0",
+      "name": "Input Messages"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1hTQn32T10IVyheSL3oFvbc7gbstLCIMB8vgjDNaT8-0",
+          "mode": "list",
+          "cachedResultName": "Untitled spreadsheet",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hTQn32T10IVyheSL3oFvbc7gbstLCIMB8vgjDNaT8-0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1hTQn32T10IVyheSL3oFvbc7gbstLCIMB8vgjDNaT8-0/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "category": "={{$json.category}}",
+            "priority": "={{$json.priority}}",
+            "confidence ": "={{$json.confidence}}",
+            "entities ": "={{JSON.stringify($json.entities)}}",
+            "urgency ": "={{$json.urgency}}",
+            "queue ": "={{$json.queue}}",
+            "escalation ": "={{$json.escalation}}",
+            "summary": "={{$json.summary}}",
+            "core_issue": "={{$json.core_issue}}",
+            "handled_by ": "={{ $json.handled_by }}",
+            "final_queue ": "={{ $json.final_queue }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "priority",
+              "displayName": "priority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "confidence ",
+              "displayName": "confidence ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "core_issue",
+              "displayName": "core_issue",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "entities ",
+              "displayName": "entities ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "urgency ",
+              "displayName": "urgency ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "queue ",
+              "displayName": "queue ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "handled_by ",
+              "displayName": "handled_by ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "escalation ",
+              "displayName": "escalation ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "final_queue ",
+              "displayName": "final_queue ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "summary",
+              "displayName": "summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2176,
+        -176
+      ],
+      "id": "024eb04e-f0ec-4847-a220-58861c5c7615",
+      "name": "Google Sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "B3GqS8olBEepPeSI",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Input Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM - Classification & Enrichment": {
+      "main": [
+        [
+          {
+            "node": "Parse LLM Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LLM Output": {
+      "main": [
+        [
+          {
+            "node": "Route: Fallback?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Engineering?": {
+      "main": [
+        [
+          {
+            "node": "Assign: Engineering",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route: Billing?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assign: Engineering": {
+      "main": [
+        [
+          {
+            "node": "Finalize: Escalation & Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Billing?": {
+      "main": [
+        [
+          {
+            "node": "Assign: Billing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route: Product?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assign: Billing": {
+      "main": [
+        [
+          {
+            "node": "Finalize: Escalation & Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Product?": {
+      "main": [
+        [
+          {
+            "node": "Assign: Product",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route: IT?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assign: Product": {
+      "main": [
+        [
+          {
+            "node": "Finalize: Escalation & Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: IT?": {
+      "main": [
+        [
+          {
+            "node": "Assign: IT",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Assign: Customer Success (Default)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assign: IT": {
+      "main": [
+        [
+          {
+            "node": "Finalize: Escalation & Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assign: Customer Success (Default)": {
+      "main": [
+        [
+          {
+            "node": "Finalize: Escalation & Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route: Fallback?": {
+      "main": [
+        [
+          {
+            "node": "Assign: Human Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route: Engineering?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assign: Human Review": {
+      "main": [
+        [
+          {
+            "node": "Finalize: Escalation & Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize: Escalation & Output": {
+      "main": [
+        [
+          {
+            "node": "Google Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input Messages": {
+      "main": [
+        [
+          {
+            "node": "LLM - Classification & Enrichment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "cfc20068-b7a2-4460-8e46-dbba47da3505",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bb6de107aaf0a06253297f579f245f25bdbcfa140d388510f087c921d761fcc2"
+  },
+  "id": "079sW1LQDobWqAiy",
+  "tags": []
+}
